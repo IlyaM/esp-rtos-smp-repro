@@ -1,17 +1,11 @@
 # esp-rtos: task-switch race with both cores scheduling (ESP32-S3)
 
-**Status:** bench builds of this program stop within a second on an ESP32-S3;
-with every thread pinned they run on. This exact program, started from power-on
-and read over serial, has not been run. See "What was measured".
-
 ## What the program does
 
 - Starts esp-rtos on both cores (`esp_rtos::start`, `esp_rtos::start_second_core`).
-- Spawns three threads that are not pinned to a core. Each one loops over
-  `yield_task()`, so every switch moves a thread that is still ready and that
-  the other core can take at once.
-- Each thread sets a flag of its own while it runs, and panics if it finds the
-  flag already set: two cores are then running the same thread.
+- Creates three threads with no core, the way esp-radio creates its timer
+  thread (`esp_radio_rtos_driver::task_create(.., None, ..)`). Each one loops
+  over `yield_task()`.
 - A priority-3 timer interrupt on the first core fires every 1 ms and keeps
   the core busy for 100 µs. It stands in for any interrupt above the context
   switch's priority.
@@ -24,8 +18,7 @@ No radio, no embassy. It uses esp-hal `main` at `bdcc3b087` (2026-10-09).
 Needs the `esp` toolchain (espup) and espflash, and any ESP32-S3 board.
 
 ```sh
-cargo run --release                  # stops
-cargo run --release --features pin   # the control: runs on
+cargo run --release
 ```
 
 Start it with a power-on or an espflash reset. A reset through a debug probe
@@ -34,24 +27,21 @@ can leave the second core running, and `start_second_core` then panics with
 
 ## Expected
 
-The counters keep growing forever, as they do with `--features pin`.
+The counters keep growing forever.
 
 ## What was measured
 
-On one ESP32-S3 board, with builds that differ from this program in two ways:
-the panic message went to memory instead of the serial port, and the chip was
-restarted once at boot to clear a second core left running by the probe.
-State was read over the debug probe; every read halts the cores.
+On one ESP32-S3 board, one boot each, with a build that differs from this
+program in two ways: the panic message and the counters went to memory instead
+of the serial port, and the chip was restarted once at boot to clear a second
+core left running by the debug probe.
 
-| Threads | Stall interrupt | Result |
-| --- | --- | --- |
-| unpinned | 1 kHz, 100 µs | stopped within the first second, 2 of 2 boots; the cores were in an exception loop and no panic message was produced |
-| unpinned | 20 kHz, 20 µs | `LoadProhibited` in `run_scheduler` on the second core 164 ms after boot, 2 of 2 boots |
-| pinned | 20 kHz, 20 µs | ran 45 s and 60 s, until stopped |
-| unpinned | none | ran 60 s, 30 s and 30 s with no debugger halt; panicked 4 times when the debugger halted the cores: `Stack overflow detected` ([task/mod.rs](https://github.com/esp-rs/esp-hal/blob/bdcc3b0872b8affbafa8f3bab79f398d07a49b5a/esp-rtos/src/task/mod.rs#L533)), the stack pointer lying in another thread's stack |
+| esp-hal | Result |
+| --- | --- |
+| `bdcc3b087`, unmodified | panics 165 ms after boot: `Detected a write to the stack guard value on ProCpu`. The first core's stack pointer is inside the second core's main stack. |
+| the same with [these 4 lines](https://github.com/IlyaM/esp-hal/commit/843047c4f81815951b915424d9e3db11bdc68ca8) (threads made with no core are pinned) | runs; stopped after 60 s and 800,000 loops per thread |
 
-Not measured: the pinned control with the 1 kHz stall; what the serial port
-shows when the program stops; a start from power-on.
+Not measured: this exact program started from power-on and read over serial.
 
 ## The mechanism
 

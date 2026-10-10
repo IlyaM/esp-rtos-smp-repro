@@ -15,10 +15,6 @@ esp-radio-rtos-driver  = { git = "https://github.com/esp-rs/esp-hal", rev = "bdc
 esp-rtos               = { git = "https://github.com/esp-rs/esp-hal", rev = "bdcc3b0872b8affbafa8f3bab79f398d07a49b5a", features = ["esp32s3", "esp-alloc", "esp-radio"] }
 static_cell            = "2.1.1"
 
-[features]
-# The control: pin every thread to a core.
-pin = []
-
 [profile.release]
 debug         = true
 lto           = "fat"

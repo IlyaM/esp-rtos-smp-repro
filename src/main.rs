@@ -1,5 +1,5 @@
-//! esp-rtos, ESP32-S3, scheduler on both cores: three unpinned threads that do
-//! nothing but yield. See README.md.
+//! esp-rtos, ESP32-S3, scheduler on both cores: three threads created with no core that
+//! do nothing but yield. See README.md.
 
 #![no_std]
 #![no_main]
@@ -22,7 +22,7 @@ use esp_hal::{
     timer::{PeriodicTimer, timg::TimerGroup},
 };
 use esp_println::println;
-use esp_rtos::{CurrentThreadHandle, thread::ThreadSpawner};
+use esp_rtos::CurrentThreadHandle;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -47,6 +47,10 @@ fn stall_first_core() {
         }
     });
     Delay::new().delay_micros(STALL_US);
+}
+
+extern "C" fn spin_entry(id: *mut core::ffi::c_void) {
+    spin(id as usize)
 }
 
 fn spin(id: usize) -> ! {
@@ -79,15 +83,17 @@ fn main() -> ! {
     CurrentThreadHandle::get().set_priority(1);
 
     for id in 0..THREADS {
-        let spawner = ThreadSpawner::new(4096);
-        // The control: with every thread pinned, the program runs on.
-        #[cfg(feature = "pin")]
-        let spawner = spawner.with_pinned_to(if id % 2 == 0 {
-            esp_hal::system::Cpu::ProCpu
-        } else {
-            esp_hal::system::Cpu::AppCpu
-        });
-        spawner.spawn(move || spin(id)).detach();
+        // Created the way esp-radio creates its timer thread: with no core.
+        unsafe {
+            esp_radio_rtos_driver::task_create(
+                "spin",
+                spin_entry,
+                id as *mut core::ffi::c_void,
+                0,
+                None,
+                4096,
+            );
+        }
     }
 
     let mut timer = PeriodicTimer::new(TimerGroup::new(peripherals.TIMG1).timer0);
