@@ -5,6 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
+critical-section       = "1"
 esp-alloc              = { git = "https://github.com/esp-rs/esp-hal", rev = "bdcc3b0872b8affbafa8f3bab79f398d07a49b5a" }
 esp-backtrace          = { git = "https://github.com/esp-rs/esp-hal", rev = "bdcc3b0872b8affbafa8f3bab79f398d07a49b5a", features = ["esp32s3", "panic-handler", "println"] }
 esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal", rev = "bdcc3b0872b8affbafa8f3bab79f398d07a49b5a", features = ["esp32s3"] }
@@ -13,6 +14,10 @@ esp-println            = { git = "https://github.com/esp-rs/esp-hal", rev = "bdc
 esp-radio-rtos-driver  = { git = "https://github.com/esp-rs/esp-hal", rev = "bdcc3b0872b8affbafa8f3bab79f398d07a49b5a" }
 esp-rtos               = { git = "https://github.com/esp-rs/esp-hal", rev = "bdcc3b0872b8affbafa8f3bab79f398d07a49b5a", features = ["esp32s3", "esp-alloc", "esp-radio"] }
 static_cell            = "2.1.1"
+
+[features]
+# The control: pin every thread to a core.
+pin = []
 
 [profile.release]
 debug         = true

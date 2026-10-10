@@ -715,6 +715,7 @@ dependencies = [
 name = "esp-rtos-smp-repro"
 version = "0.0.0"
 dependencies = [
+ "critical-section",
  "esp-alloc",
  "esp-backtrace",
  "esp-bootloader-esp-idf",

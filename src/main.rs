@@ -4,18 +4,22 @@
 #![no_std]
 #![no_main]
 
-use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use core::{
+    cell::RefCell,
+    sync::atomic::{AtomicBool, AtomicU32, Ordering},
+};
 
+use critical_section::Mutex;
 use esp_backtrace as _;
 use esp_hal::{
+    Blocking,
     delay::Delay,
     handler,
-    interrupt::{Priority, software::SoftwareInterrupt},
+    interrupt::Priority,
     main,
-    peripherals::FROM_CPU_INTR2,
-    system::{Cpu, Stack},
+    system::Stack,
     time::Duration,
-    timer::timg::TimerGroup,
+    timer::{PeriodicTimer, timg::TimerGroup},
 };
 use esp_println::println;
 use esp_rtos::{CurrentThreadHandle, thread::ThreadSpawner};
@@ -24,17 +28,24 @@ esp_bootloader_esp_idf::esp_app_desc!();
 
 const THREADS: usize = 3;
 
-/// How long the priority-3 interrupt keeps the first core busy. It stands in
-/// for any interrupt above the context switch's priority.
-/// Set to 0 to run without it.
-const STALL_US: u32 = 20;
+/// A priority-3 timer interrupt on the first core fires every
+/// `STALL_PERIOD_US` and keeps the core busy for `STALL_US`. It stands in for
+/// any interrupt above the context switch's priority.
+const STALL_PERIOD_US: u64 = 1000;
+const STALL_US: u32 = 100;
 
 static RUNNING: [AtomicBool; THREADS] = [const { AtomicBool::new(false) }; THREADS];
 static LOOPS: [AtomicU32; THREADS] = [const { AtomicU32::new(0) }; THREADS];
+static STALL_TIMER: Mutex<RefCell<Option<PeriodicTimer<'static, Blocking>>>> =
+    Mutex::new(RefCell::new(None));
 
 #[handler(priority = Priority::Priority3)]
 fn stall_first_core() {
-    SoftwareInterrupt::new(unsafe { FROM_CPU_INTR2::steal() }).reset();
+    critical_section::with(|cs| {
+        if let Some(timer) = STALL_TIMER.borrow_ref_mut(cs).as_mut() {
+            timer.clear_interrupt();
+        }
+    });
     Delay::new().delay_micros(STALL_US);
 }
 
@@ -46,9 +57,6 @@ fn spin(id: usize) -> ! {
             panic!("thread {} is running on both cores", id);
         }
         LOOPS[id].fetch_add(1, Ordering::Relaxed);
-        if STALL_US > 0 && Cpu::current() == Cpu::AppCpu {
-            SoftwareInterrupt::new(unsafe { FROM_CPU_INTR2::steal() }).raise();
-        }
         RUNNING[id].store(false, Ordering::SeqCst);
 
         esp_radio_rtos_driver::yield_task();
@@ -63,17 +71,30 @@ fn main() -> ! {
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
 
-    // Bound on the first core, raised from the second.
-    SoftwareInterrupt::new(peripherals.FROM_CPU_INTR2).set_interrupt_handler(stall_first_core);
-
     static APP_CORE_STACK: static_cell::ConstStaticCell<Stack<8192>> =
         static_cell::ConstStaticCell::new(Stack::new());
     esp_rtos::start_second_core(peripherals.CPU_CTRL, APP_CORE_STACK.take(), || {});
 
+    // Above the spinning threads, so that they cannot starve this one.
+    CurrentThreadHandle::get().set_priority(1);
+
     for id in 0..THREADS {
-        // No `with_pinned_to`: either core may run the thread.
-        ThreadSpawner::new(4096).spawn(move || spin(id)).detach();
+        let spawner = ThreadSpawner::new(4096);
+        // The control: with every thread pinned, the program runs on.
+        #[cfg(feature = "pin")]
+        let spawner = spawner.with_pinned_to(if id % 2 == 0 {
+            esp_hal::system::Cpu::ProCpu
+        } else {
+            esp_hal::system::Cpu::AppCpu
+        });
+        spawner.spawn(move || spin(id)).detach();
     }
+
+    let mut timer = PeriodicTimer::new(TimerGroup::new(peripherals.TIMG1).timer0);
+    timer.set_interrupt_handler(stall_first_core);
+    timer.start(Duration::from_micros(STALL_PERIOD_US)).unwrap();
+    timer.listen();
+    critical_section::with(|cs| STALL_TIMER.borrow_ref_mut(cs).replace(timer));
 
     let mut seconds = 0;
     loop {
