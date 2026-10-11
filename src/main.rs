@@ -1,5 +1,5 @@
-//! esp-rtos, ESP32-S3, scheduler on both cores: three threads created with no core that
-//! do nothing but yield. See README.md.
+//! esp-rtos, ESP32-S3, scheduler on both cores: three threads created with no
+//! core that only count and yield. See README.md.
 
 #![no_std]
 #![no_main]
@@ -28,9 +28,8 @@ esp_bootloader_esp_idf::esp_app_desc!();
 
 const THREADS: usize = 3;
 
-/// A priority-3 timer interrupt on the first core fires every
-/// `STALL_PERIOD_US` and keeps the core busy for `STALL_US`. It stands in for
-/// any interrupt above the context switch's priority.
+/// A priority-3 timer interrupt keeps the first core busy for `STALL_US` every
+/// `STALL_PERIOD_US`.
 const STALL_PERIOD_US: u64 = 1000;
 const STALL_US: u32 = 100;
 
