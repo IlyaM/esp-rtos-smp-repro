@@ -5,7 +5,8 @@
 - Starts esp-rtos on both cores (`esp_rtos::start`, `esp_rtos::start_second_core`).
 - Creates three threads with no core, the way esp-radio creates its timer
   thread (`esp_radio_rtos_driver::task_create(.., None, ..)`). They only
-  count and yield, and panic if one finds itself running on both cores.
+  count and yield. Each also panics if it finds that two cores are running
+  it at the same time.
 - A priority-3 timer interrupt keeps the first core busy for 100 µs every
   millisecond.
 - The main thread prints the loop counters once a second.
@@ -30,15 +31,15 @@ The counters keep growing forever.
 
 ## What was measured
 
-ESP32-S3, one boot each, with a build that differs from this program in two
+ESP32-S3, four boots each, with a build that differs from this program in two
 ways: the panic message and the counters went to memory instead of the serial
 port, and the chip was restarted once at boot to clear a second core left
 running by the debug probe.
 
 | esp-hal | Result |
 | --- | --- |
-| `bdcc3b087`, unmodified | panics 165 ms after boot: `Detected a write to the stack guard value on ProCpu`. The first core's stack pointer is inside the second core's main stack. |
-| with [4 lines](https://github.com/IlyaM/esp-hal/commit/843047c4f81815951b915424d9e3db11bdc68ca8) that pin a thread created with no core | runs; stopped after 60 s |
+| `bdcc3b087`, unmodified | every boot panics 165 ms after start: `Detected a write to the stack guard value on ProCpu`. The first core's stack pointer is inside the second core's main stack. |
+| with [4 lines](https://github.com/IlyaM/esp-hal/commit/843047c4f81815951b915424d9e3db11bdc68ca8) that pin a thread created with no core | every boot runs; stopped after 30 to 60 s |
 
 Not measured: this exact program started from power-on and read over serial.
 
